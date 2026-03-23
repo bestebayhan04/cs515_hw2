@@ -4,6 +4,8 @@ import argparse
 
 @dataclass
 class TrainConfig:
+    """Configuration for training and testing."""
+
     mode: str
     model_name: str
     data_dir: str
@@ -23,12 +25,20 @@ class TrainConfig:
     kd_temperature: float
     pretrained: bool
     resize_to_imagenet: bool
+    teacher_checkpoint_path: str
+    distillation: bool
+    freeze_backbone: bool
+    teacher_guided_smoothing: bool
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Transfer Learning and Knowledge Distillation on CIFAR-10")
+    """Create argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Transfer Learning and Knowledge Distillation on CIFAR-10"
+    )
 
     parser.add_argument("--mode", type=str, default="train", choices=["train", "test"])
+
     parser.add_argument(
         "--model_name",
         type=str,
@@ -38,7 +48,6 @@ def build_parser() -> argparse.ArgumentParser:
             "resnet18_cifar",
             "mobilenet_cifar",
             "transfer_resnet18",
-            "transfer_vgg16",
         ],
     )
 
@@ -49,24 +58,39 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--num_workers", type=int, default=2)
+
+    # Important: keep image_size flexible but override later if needed
     parser.add_argument("--image_size", type=int, default=32)
+
     parser.add_argument("--use_cuda", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
+
     parser.add_argument("--save_dir", type=str, default="./checkpoints")
     parser.add_argument("--checkpoint_path", type=str, default="")
+
     parser.add_argument("--label_smoothing", type=float, default=0.0)
     parser.add_argument("--kd_alpha", type=float, default=0.5)
     parser.add_argument("--kd_temperature", type=float, default=4.0)
+
     parser.add_argument("--pretrained", action="store_true")
+
+    # Important flag for transfer learning
     parser.add_argument("--resize_to_imagenet", action="store_true")
+
+    parser.add_argument("--teacher_checkpoint_path", type=str, default="")
+    parser.add_argument("--distillation", action="store_true")
+    parser.add_argument("--freeze_backbone", action="store_true")
+    parser.add_argument("--teacher_guided_smoothing", action="store_true")
 
     return parser
 
 
 def get_config() -> TrainConfig:
+    """Parse arguments and return TrainConfig."""
     parser = build_parser()
     args = parser.parse_args()
 
+    # Ensure consistency between resize flag and image size
     image_size = 224 if args.resize_to_imagenet else args.image_size
 
     return TrainConfig(
@@ -89,4 +113,8 @@ def get_config() -> TrainConfig:
         kd_temperature=args.kd_temperature,
         pretrained=args.pretrained,
         resize_to_imagenet=args.resize_to_imagenet,
+        teacher_checkpoint_path=args.teacher_checkpoint_path,
+        distillation=args.distillation,
+        freeze_backbone=args.freeze_backbone,
+        teacher_guided_smoothing=args.teacher_guided_smoothing,
     )

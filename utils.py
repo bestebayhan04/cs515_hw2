@@ -9,10 +9,18 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from parameters import TrainConfig
-from models import SimpleCNN
+from models.mobilenet_cifar import MobileNetCIFAR, MobileNetCIFARConfig
+from models.resnet_cifar import BasicBlock, ResNetCIFARConfig, resnet18_cifar
+from models.simple_cnn import SimpleCNN, SimpleCNNConfig
+from models.transfer_resnet import TransferResNet18, TransferResNet18Config
 
 
 def set_seed(seed: int) -> None:
+    """Set random seed for reproducibility.
+
+    Args:
+        seed (int): Random seed value.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -20,12 +28,29 @@ def set_seed(seed: int) -> None:
 
 
 def get_device(use_cuda: bool) -> torch.device:
+    """Get computation device.
+
+    Args:
+        use_cuda (bool): Whether to use GPU.
+
+    Returns:
+        torch.device: Selected device.
+    """
     if use_cuda and torch.cuda.is_available():
         return torch.device("cuda")
     return torch.device("cpu")
 
 
 def accuracy_from_logits(logits: torch.Tensor, targets: torch.Tensor) -> float:
+    """Compute accuracy from logits.
+
+    Args:
+        logits (torch.Tensor): Model outputs.
+        targets (torch.Tensor): Ground-truth labels.
+
+    Returns:
+        float: Accuracy value.
+    """
     preds = torch.argmax(logits, dim=1)
     correct = (preds == targets).sum().item()
     total = targets.size(0)
@@ -33,6 +58,14 @@ def accuracy_from_logits(logits: torch.Tensor, targets: torch.Tensor) -> float:
 
 
 def get_transforms(config: TrainConfig) -> Tuple[transforms.Compose, transforms.Compose]:
+    """Create data transforms.
+
+    Args:
+        config (TrainConfig): Configuration object.
+
+    Returns:
+        Tuple[transforms.Compose, transforms.Compose]: Train and test transforms.
+    """
     mean = (0.4914, 0.4822, 0.4465)
     std = (0.2023, 0.1994, 0.2010)
 
@@ -63,6 +96,14 @@ def get_transforms(config: TrainConfig) -> Tuple[transforms.Compose, transforms.
 
 
 def get_dataloaders(config: TrainConfig) -> Tuple[DataLoader, DataLoader]:
+    """Create train and test dataloaders.
+
+    Args:
+        config (TrainConfig): Configuration object.
+
+    Returns:
+        Tuple[DataLoader, DataLoader]: Train and test loaders.
+    """
     train_transform, test_transform = get_transforms(config)
 
     train_dataset = datasets.CIFAR10(
@@ -97,14 +138,51 @@ def get_dataloaders(config: TrainConfig) -> Tuple[DataLoader, DataLoader]:
 
 
 def get_model(config: TrainConfig) -> nn.Module:
+    """Create model based on configuration.
+
+    Args:
+        config (TrainConfig): Configuration object.
+
+    Returns:
+        nn.Module: Model instance.
+    """
     if config.model_name == "simple_cnn":
-        return SimpleCNN(num_classes=config.num_classes)
+        model_config = SimpleCNNConfig(
+            num_classes=config.num_classes,
+        )
+        return SimpleCNN(model_config)
 
     if config.model_name == "resnet18_cifar":
-        from models import resnet18_cifar
-        return resnet18_cifar(num_classes=config.num_classes)
+        model_config = ResNetCIFARConfig(
+            block=BasicBlock,
+            num_blocks=[2, 2, 2, 2],
+            num_classes=config.num_classes,
+        )
+        return resnet18_cifar(model_config)
+
+    if config.model_name == "transfer_resnet18":
+        model_config = TransferResNet18Config(
+            num_classes=config.num_classes,
+            pretrained=config.pretrained,
+            resize_to_imagenet=config.resize_to_imagenet,
+            freeze_backbone=config.freeze_backbone,
+        )
+        return TransferResNet18(model_config)
+
+    if config.model_name == "mobilenet_cifar":
+        model_config = MobileNetCIFARConfig(
+            num_classes=config.num_classes,
+            pretrained=config.pretrained,
+        )
+        return MobileNetCIFAR(model_config)
 
     raise ValueError(f"Model {config.model_name} is not implemented yet.")
 
+
 def ensure_dir(path: str) -> None:
+    """Create directory if it does not exist.
+
+    Args:
+        path (str): Directory path.
+    """
     os.makedirs(path, exist_ok=True)

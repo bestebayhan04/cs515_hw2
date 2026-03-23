@@ -5,6 +5,7 @@ from utils import set_seed
 
 
 def main() -> None:
+    """Main entry point for training or testing."""
     config = get_config()
     set_seed(config.seed)
 
