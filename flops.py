@@ -1,4 +1,3 @@
-import torch
 from ptflops import get_model_complexity_info
 
 from parameters import TrainConfig
@@ -6,14 +5,12 @@ from utils import get_model
 
 
 def compute_model_flops(model_name: str, image_size: int = 32) -> None:
-
     """Compute and print FLOPs and parameter count.
 
     Args:
         model_name (str): Model identifier.
         image_size (int): Input image size.
     """
-    
     config = TrainConfig(
         mode="test",
         model_name=model_name,
@@ -29,15 +26,16 @@ def compute_model_flops(model_name: str, image_size: int = 32) -> None:
         seed=42,
         save_dir="./checkpoints",
         checkpoint_path="",
-        teacher_checkpoint_path="",
         label_smoothing=0.0,
         kd_alpha=0.5,
         kd_temperature=4.0,
         pretrained=False,
         resize_to_imagenet=(image_size == 224),
+        teacher_checkpoint_path="",
         distillation=False,
         freeze_backbone=False,
         teacher_guided_smoothing=False,
+        val_split=0.1,
     )
 
     model = get_model(config)

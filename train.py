@@ -1,12 +1,16 @@
 import os
 from typing import Any, Dict, Optional
-
+import csv
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-from losses import DistillationLoss, DistillationLossConfig, TeacherGuidedLabelSmoothingLoss
+from losses import (
+    DistillationLoss,
+    DistillationLossConfig,
+    TeacherGuidedLabelSmoothingLoss,
+)
 from parameters import TrainConfig
 from utils import (
     accuracy_from_logits,
@@ -78,15 +82,13 @@ def train_one_epoch(
 def evaluate(
     model: nn.Module,
     loader: Any,
-    criterion: nn.Module,
     device: torch.device,
 ) -> Dict[str, float]:
-    """Evaluate model on validation data.
+    """Evaluate model on validation or test data.
 
     Args:
         model (nn.Module): Model to evaluate.
-        loader (Any): Validation data loader.
-        criterion (nn.Module): Loss function.
+        loader (Any): Validation or test data loader.
         device (torch.device): Device to use.
 
     Returns:
@@ -98,22 +100,21 @@ def evaluate(
     running_acc: float = 0.0
     total_batches: int = 0
 
-    # Validation is always reported with standard cross-entropy
-    ce_eval = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss()
 
-    for images, targets in tqdm(loader, desc="Validation", leave=False):
+    for images, targets in tqdm(loader, desc="Evaluation", leave=False):
         images = images.to(device)
         targets = targets.to(device)
 
         logits = model(images)
-        loss = ce_eval(logits, targets)
+        loss = criterion(logits, targets)
 
         running_loss += loss.item()
         running_acc += accuracy_from_logits(logits, targets)
         total_batches += 1
 
     if total_batches == 0:
-        raise ValueError("No validation batches found.")
+        raise ValueError("No evaluation batches found.")
 
     return {
         "loss": running_loss / total_batches,
@@ -154,6 +155,7 @@ def build_teacher_config(config: TrainConfig) -> TrainConfig:
         distillation=False,
         freeze_backbone=False,
         teacher_guided_smoothing=False,
+        val_split=config.val_split,
     )
 
 
@@ -164,7 +166,7 @@ def train_model(config: TrainConfig) -> None:
         config (TrainConfig): Configuration object.
     """
     device = get_device(config.use_cuda)
-    train_loader, test_loader = get_dataloaders(config)
+    train_loader, val_loader, test_loader = get_dataloaders(config)
     model = get_model(config).to(device)
 
     teacher_model: Optional[nn.Module] = None
@@ -201,7 +203,9 @@ def train_model(config: TrainConfig) -> None:
     )
 
     ensure_dir(config.save_dir)
-    best_acc: float = 0.0
+    best_acc: float = -1.0
+    history: list[dict[str, float]] = []
+    best_checkpoint_path: Optional[str] = None
 
     for epoch in range(config.epochs):
         print(f"\nEpoch [{epoch + 1}/{config.epochs}]")
@@ -217,8 +221,7 @@ def train_model(config: TrainConfig) -> None:
 
         val_metrics = evaluate(
             model=model,
-            loader=test_loader,
-            criterion=criterion,
+            loader=val_loader,
             device=device,
         )
 
@@ -229,6 +232,15 @@ def train_model(config: TrainConfig) -> None:
         print(
             f"Val Loss:   {val_metrics['loss']:.4f} | "
             f"Val Acc:   {val_metrics['acc'] * 100:.2f}%"
+        )
+        history.append(
+            {
+                "epoch": epoch + 1,
+                "train_loss": train_metrics["loss"],
+                "train_acc": train_metrics["acc"] * 100,
+                "val_loss": val_metrics["loss"],
+                "val_acc": val_metrics["acc"] * 100,
+            }
         )
 
         if val_metrics["acc"] > best_acc:
@@ -241,11 +253,45 @@ def train_model(config: TrainConfig) -> None:
             else:
                 suffix = "_best.pth"
 
-            checkpoint_file = os.path.join(
+            best_checkpoint_path = os.path.join(
                 config.save_dir,
                 f"{config.model_name}{suffix}",
             )
-            torch.save(model.state_dict(), checkpoint_file)
-            print(f"Saved best model to: {checkpoint_file}")
+            torch.save(model.state_dict(), best_checkpoint_path)
+            print(f"Saved best model to: {best_checkpoint_path}")
 
     print(f"\nBest Validation Accuracy: {best_acc * 100:.2f}%")
+
+    if best_checkpoint_path is None:
+        raise ValueError("Best checkpoint was not saved during training.")
+
+    best_state_dict = torch.load(best_checkpoint_path, map_location=device)
+    model.load_state_dict(best_state_dict)
+
+    test_metrics = evaluate(
+        model=model,
+        loader=test_loader,
+        device=device,
+    )
+
+    print(
+        f"Final Test Loss: {test_metrics['loss']:.4f} | "
+        f"Final Test Acc: {test_metrics['acc'] * 100:.2f}%"
+    )
+
+    history_path = os.path.join(config.save_dir, f"{config.model_name}_history.csv")
+
+    with open(history_path, "w", newline="") as csvfile:
+        writer = csv.DictWriter(
+            csvfile,
+            fieldnames=["epoch", "train_loss", "train_acc", "val_loss", "val_acc"],
+        )
+        writer.writeheader()
+        writer.writerows(history)
+
+    print(f"Saved training history to: {history_path}")
+
+    print("\n=== FINAL RESULTS ===")
+    print(f"Last Train Acc: {train_metrics['acc'] * 100:.2f}%")
+    print(f"Best Val Acc:   {best_acc * 100:.2f}%")
+    print(f"Test Acc:       {test_metrics['acc'] * 100:.2f}%")

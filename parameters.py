@@ -29,6 +29,7 @@ class TrainConfig:
     distillation: bool
     freeze_backbone: bool
     teacher_guided_smoothing: bool
+    val_split: float
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,8 +59,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--num_workers", type=int, default=2)
-
-    # Important: keep image_size flexible but override later if needed
     parser.add_argument("--image_size", type=int, default=32)
 
     parser.add_argument("--use_cuda", action="store_true")
@@ -73,14 +72,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kd_temperature", type=float, default=4.0)
 
     parser.add_argument("--pretrained", action="store_true")
-
-    # Important flag for transfer learning
     parser.add_argument("--resize_to_imagenet", action="store_true")
 
     parser.add_argument("--teacher_checkpoint_path", type=str, default="")
     parser.add_argument("--distillation", action="store_true")
     parser.add_argument("--freeze_backbone", action="store_true")
     parser.add_argument("--teacher_guided_smoothing", action="store_true")
+    parser.add_argument("--val_split", type=float, default=0.1)
 
     return parser
 
@@ -90,8 +88,10 @@ def get_config() -> TrainConfig:
     parser = build_parser()
     args = parser.parse_args()
 
-    # Ensure consistency between resize flag and image size
     image_size = 224 if args.resize_to_imagenet else args.image_size
+
+    if not 0.0 < args.val_split < 1.0:
+        raise ValueError("--val_split must be between 0 and 1.")
 
     return TrainConfig(
         mode=args.mode,
@@ -117,4 +117,5 @@ def get_config() -> TrainConfig:
         distillation=args.distillation,
         freeze_backbone=args.freeze_backbone,
         teacher_guided_smoothing=args.teacher_guided_smoothing,
+        val_split=args.val_split,
     )

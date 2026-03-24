@@ -5,7 +5,7 @@ from typing import Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
 from parameters import TrainConfig
@@ -64,66 +64,107 @@ def get_transforms(config: TrainConfig) -> Tuple[transforms.Compose, transforms.
         config (TrainConfig): Configuration object.
 
     Returns:
-        Tuple[transforms.Compose, transforms.Compose]: Train and test transforms.
+        Tuple[transforms.Compose, transforms.Compose]: Train and evaluation transforms.
     """
     mean = (0.4914, 0.4822, 0.4465)
     std = (0.2023, 0.1994, 0.2010)
 
     if config.resize_to_imagenet:
-        train_transform = transforms.Compose([
-            transforms.Resize((config.image_size, config.image_size)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ])
-        test_transform = transforms.Compose([
-            transforms.Resize((config.image_size, config.image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ])
+        train_transform = transforms.Compose(
+            [
+                transforms.Resize((config.image_size, config.image_size)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ]
+        )
+        eval_transform = transforms.Compose(
+            [
+                transforms.Resize((config.image_size, config.image_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ]
+        )
     else:
-        train_transform = transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ])
-        test_transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ])
+        train_transform = transforms.Compose(
+            [
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ]
+        )
+        eval_transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ]
+        )
 
-    return train_transform, test_transform
+    return train_transform, eval_transform
 
 
-def get_dataloaders(config: TrainConfig) -> Tuple[DataLoader, DataLoader]:
-    """Create train and test dataloaders.
+def get_dataloaders(
+    config: TrainConfig,
+) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    """Create train, validation, and test dataloaders.
 
     Args:
         config (TrainConfig): Configuration object.
 
     Returns:
-        Tuple[DataLoader, DataLoader]: Train and test loaders.
+        Tuple[DataLoader, DataLoader, DataLoader]:
+            Train, validation, and test loaders.
     """
-    train_transform, test_transform = get_transforms(config)
+    train_transform, eval_transform = get_transforms(config)
 
-    train_dataset = datasets.CIFAR10(
+    full_train_dataset_for_train = datasets.CIFAR10(
         root=config.data_dir,
         train=True,
         download=True,
         transform=train_transform,
     )
 
+    full_train_dataset_for_eval = datasets.CIFAR10(
+        root=config.data_dir,
+        train=True,
+        download=True,
+        transform=eval_transform,
+    )
+
     test_dataset = datasets.CIFAR10(
         root=config.data_dir,
         train=False,
         download=True,
-        transform=test_transform,
+        transform=eval_transform,
     )
+
+    num_train_samples = len(full_train_dataset_for_train)
+    num_val_samples = int(num_train_samples * config.val_split)
+    num_train_split_samples = num_train_samples - num_val_samples
+
+    if num_val_samples == 0 or num_train_split_samples == 0:
+        raise ValueError("Validation split produced an empty train or validation set.")
+
+    generator = torch.Generator().manual_seed(config.seed)
+    indices = torch.randperm(num_train_samples, generator=generator).tolist()
+
+    train_indices = indices[:num_train_split_samples]
+    val_indices = indices[num_train_split_samples:]
+
+    train_dataset = Subset(full_train_dataset_for_train, train_indices)
+    val_dataset = Subset(full_train_dataset_for_eval, val_indices)
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
+        num_workers=config.num_workers,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
         num_workers=config.num_workers,
     )
 
@@ -134,7 +175,7 @@ def get_dataloaders(config: TrainConfig) -> Tuple[DataLoader, DataLoader]:
         num_workers=config.num_workers,
     )
 
-    return train_loader, test_loader
+    return train_loader, val_loader, test_loader
 
 
 def get_model(config: TrainConfig) -> nn.Module:

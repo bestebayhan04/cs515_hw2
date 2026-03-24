@@ -14,14 +14,13 @@ def test_model(config: TrainConfig) -> None:
     """
     device = get_device(config.use_cuda)
 
-    _, test_loader = get_dataloaders(config)
+    _, _, test_loader = get_dataloaders(config)
 
     model = get_model(config).to(device)
 
     if not config.checkpoint_path:
         raise ValueError("Please provide --checkpoint_path for test mode.")
 
-    # Load checkpoint safely
     state_dict = torch.load(config.checkpoint_path, map_location=device)
     model.load_state_dict(state_dict)
 
